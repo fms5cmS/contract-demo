@@ -6,6 +6,7 @@
     "compile": "mise exec -- hardhat compile",
     "test": "mise exec -- hardhat test",
     "test:sepolia:type4": "RUN_SEPOLIA_TYPE4=1 mise exec -- hardhat test test/smartWallet/type4-delegate-init-execute.test.js",
+    "test:sepolia:revoke": "RUN_SEPOLIA_DIRECT_REVOKE=1 mise exec -- hardhat test test/smartWallet/direct-execute-batch-revoke.test.js",
     "clean": "mise exec -- hardhat clean",
     "node": "mise exec -- hardhat node",
     "deploy:smart-wallet": "mise exec -- hardhat run scripts/deploy-smart-wallet.js",

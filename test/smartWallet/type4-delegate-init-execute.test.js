@@ -6,6 +6,7 @@ const { expect } = require("chai");
 const {
   createPublicClient,
   createWalletClient,
+  decodeFunctionResult,
   encodeAbiParameters,
   encodeFunctionData,
   getAddress,
@@ -14,7 +15,7 @@ const {
   parseAbi,
   zeroAddress,
 } = require("viem");
-const { generatePrivateKey, privateKeyToAccount } = require("viem/accounts");
+const { privateKeyToAccount } = require("viem/accounts");
 const { sepolia } = require("viem/chains");
 
 const shouldRun = process.env.RUN_SEPOLIA_TYPE4 === "1";
@@ -90,6 +91,7 @@ function appendChainLog({
   implementation,
   spender,
   sponsor,
+  description,
 }) {
   let existing = "";
   if (fs.existsSync(chainLogPath)) {
@@ -107,15 +109,47 @@ function appendChainLog({
     `- 测试文件: type4-delegate-init-execute.test.js`,
     `- 交易哈希: \`${hash}\``,
     `- 区块号: ${blockNumber}`,
-    `- 说明: 赞助地址 ${sponsor} 发起了一笔 type-4 交易，将新的 EOA ${owner} 委托到实现合约 ${implementation}，触发 \`Initialized\` 事件，并向 spender ${spender} 完成了 3 笔 ERC20 授权，额度分别为 1、2、3。`,
+    `- 钱包 EOA: \`${owner}\``,
+    `- 说明: ${description || `赞助地址 ${sponsor} 发起了一笔 type-4 交易，将配置中的 EOA ${owner} 委托到实现合约 ${implementation}，触发 \`Initialized\` 事件，并向 spender ${spender} 完成了 3 笔 ERC20 授权，额度分别为 1、2、3。`}`,
   ];
 
   fs.appendFileSync(chainLogPath, `${lines.join("\n")}\n`);
 }
 
+async function readWalletStateWithOverride({
+  publicClient,
+  eoaAddress,
+  implementation,
+  functionName,
+}) {
+  const data = encodeFunctionData({
+    abi: smartWalletAbi,
+    functionName,
+  });
+  const raw = await publicClient.request({
+    method: "eth_call",
+    params: [
+      { to: eoaAddress, data },
+      "latest",
+      {
+        [eoaAddress]: {
+          code: await publicClient.getCode({ address: implementation }),
+        },
+      },
+    ],
+  });
+
+  return decodeFunctionResult({
+    abi: smartWalletAbi,
+    functionName,
+    data: raw,
+  });
+}
+
 describeIf("SmartWallet Sepolia type-4 approvals", function () {
   this.timeout(180_000);
 
+  let eoa;
   let implementation;
   let publicClient;
   let sponsor;
@@ -125,6 +159,7 @@ describeIf("SmartWallet Sepolia type-4 approvals", function () {
     const rpcUrl = requiredEnv("RPC_URL");
 
     implementation = getAddress(requiredEnv("SMART_WALLET_ADDRESS"));
+    eoa = privateKeyToAccount(normalizePrivateKey(requiredEnv("EOA_PRIVATE_KEY")));
     sponsor = privateKeyToAccount(
       normalizePrivateKey(requiredEnv("SPONSOR_PRIVATE_KEY"))
     );
@@ -139,8 +174,8 @@ describeIf("SmartWallet Sepolia type-4 approvals", function () {
     });
   });
 
-  it("delegates a fresh EOA and approves the three requested tokens in the same type-4 transaction", async function () {
-    const owner = privateKeyToAccount(generatePrivateKey());
+  it("uses the configured EOA to delegate, initialize, and batch approve in the same type-4 transaction", async function () {
+    const owner = eoa;
     const dest = TOKENS.map(({ address }) => getAddress(address));
     const value = [0n, 0n, 0n];
     const func = TOKENS.map(({ amount }) =>
@@ -160,10 +195,32 @@ describeIf("SmartWallet Sepolia type-4 approvals", function () {
     const ownerSignature = await owner.signMessage({
       message: { raw: executionHash },
     });
+    const authorizationNonce = await publicClient.getTransactionCount({
+      address: owner.address,
+      blockTag: "pending",
+    });
+    const [ownerBefore, walletNonceBefore] = await Promise.all([
+      readWalletStateWithOverride({
+        publicClient,
+        eoaAddress: owner.address,
+        implementation,
+        functionName: "owner",
+      }),
+      readWalletStateWithOverride({
+        publicClient,
+        eoaAddress: owner.address,
+        implementation,
+        functionName: "getNonce",
+      }),
+    ]);
+
+    expect(ownerBefore).to.equal(zeroAddress);
+    expect(walletNonceBefore).to.equal(0n);
+
     const authorization = await owner.signAuthorization({
       address: implementation,
       chainId: sepolia.id,
-      nonce: 0,
+      nonce: authorizationNonce,
     });
 
     const hash = await sponsorClient.sendTransaction({
@@ -203,6 +260,9 @@ describeIf("SmartWallet Sepolia type-4 approvals", function () {
       implementation,
       spender: getAddress(SPENDER),
       sponsor: sponsor.address,
+      description: `赞助地址 ${sponsor.address} 发起了一笔 type-4 交易，将配置文件中的 EOA ${owner.address} 委托到实现合约 ${implementation}，在同一笔交易中完成初始化并向 spender ${getAddress(
+        SPENDER
+      )} 批量授权 3 个 ERC20，额度分别为 1、2、3。`,
     });
 
     const expectedCode = `0xef0100${implementation.toLowerCase().slice(2)}`;
