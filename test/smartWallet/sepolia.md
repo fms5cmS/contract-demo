@@ -41,3 +41,11 @@
 - 区块号: 10641896
 - 钱包 EOA: `0x959FADa6c5439f2E8dc2cFd6830EbC51C55f606f`
 - 说明: 配置文件中的 EOA 0x959FADa6c5439f2E8dc2cFd6830EbC51C55f606f 直接发起了一笔普通交易（非 type-4），在已经完成委托和初始化的 SmartWallet 上执行批量取消授权，将 spender 0xDB115FB6b4a3b74346eaA747a9d45DfBBB8e2B4C 对 3 个 ERC20 的授权额度统一撤销为 0。
+
+## 2026-04-12T05:33:52.166Z
+- 合约: SmartWallet
+- 测试文件: relayed-approve-native-gas-fee.test.js
+- 交易哈希: `0x0a1eaaf842b949dd1d4664fb4b87a43fed1593ed100e99aab79d9f67c779c59d`
+- 区块号: 10642016
+- 钱包 EOA: `0x959FADa6c5439f2E8dc2cFd6830EbC51C55f606f`
+- 说明: 配置文件中的 EOA 0x959FADa6c5439f2E8dc2cFd6830EbC51C55f606f 对 token 0x10279e6333f9d0EE103F4715b8aaEA75BE61464C 向 spender 0xFdE37Fc2DFb18D5d901768A47c222feF30C7EFc5 授权 10。链上交易由 sponsor 0x9B3390F251A28f3b9EF82621270B4b7c0dE6cC4a 发起，使用普通交易（非 type-4）执行，SmartWallet 额外以主链币向 gasReceiver 0x9B3390F251A28f3b9EF82621270B4b7c0dE6cC4a 支付了 1 Gwei 的 gasFee。

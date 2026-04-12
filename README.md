@@ -131,6 +131,32 @@ npm run test:sepolia:revoke
 
 - `test/smartWallet/direct-execute-batch-revoke.test.js`
 
+### 3. sponsor 代付 gas 的普通交易授权
+
+执行命令：
+
+```bash
+npm run test:sepolia:relay-approve
+```
+
+作用：
+
+- 使用配置文件中的 `EOA_PRIVATE_KEY` 生成签名授权。
+- 由 sponsor 发起一笔普通交易，直接调用已经完成委托和初始化的 SmartWallet。
+- 对 token `0x10279e6333f9d0EE103F4715b8aaEA75BE61464C` 向 spender `0xFdE37Fc2DFb18D5d901768A47c222feF30C7EFc5` 授权 `10`。
+- `gasToken` 使用主链币，也就是 `address(0)`。
+- `gasFee` 固定为 `1 Gwei`。
+- `gasReceive` 固定为 sponsor 地址 `0x9B3390F251A28f3b9EF82621270B4b7c0dE6cC4a`。
+
+说明：
+
+- 这条测试不是 type-4。
+- 它走的是 SmartWallet 的 relayer 普通交易路径：EOA 只负责签名，sponsor 负责真正发链上交易。
+
+对应测试文件：
+
+- `test/smartWallet/relayed-approve-native-gas-fee.test.js`
+
 ## 链上日志记录
 
 `test/smartWallet` 目录下的真实链测试会把 `smartWallet` 相关交易记录到按链名命名的日志文件中。
