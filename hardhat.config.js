@@ -12,6 +12,7 @@ const SEPOLIA_RPC_URL =
   process.env.RPC_URL ||
   process.env.SEPOLIA_RPC_URL ||
   "";
+const CHAIN_ID = Number(process.env.CHAIN_ID || "11155111");
 const ETH_MAINNET_RPC_URL = process.env.ETH_MAINNET_RPC_URL || "";
 const ETHERSCAN_API_KEY =
   process.env.ETHERSCAN_API_KEY ||
@@ -36,7 +37,12 @@ module.exports = {
     },
     sepolia: {
       url: SEPOLIA_RPC_URL,
-      chainId: 11155111,
+      chainId: CHAIN_ID,
+      accounts,
+    },
+    bsc: {
+      url: SEPOLIA_RPC_URL,
+      chainId: CHAIN_ID,
       accounts,
     },
     mainnet: {
