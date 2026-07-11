@@ -5,18 +5,16 @@
   "scripts": {
     "compile": "mise exec -- hardhat compile",
     "test": "mise exec -- hardhat test",
-    "test:sepolia:type4": "RUN_SEPOLIA_TYPE4=1 mise exec -- hardhat test test/smartWallet/type4-delegate-init-execute.test.js",
-    "test:sepolia:revoke": "RUN_SEPOLIA_DIRECT_REVOKE=1 mise exec -- hardhat test test/smartWallet/direct-execute-batch-revoke.test.js",
-    "test:sepolia:relay-approve": "RUN_SEPOLIA_RELAY_APPROVE=1 mise exec -- hardhat test test/smartWallet/relayed-approve-native-gas-fee.test.js",
     "clean": "mise exec -- hardhat clean",
     "node": "mise exec -- hardhat node",
-    "deploy:smart-wallet": "mise exec -- hardhat run scripts/deploy-smart-wallet.js",
-    "deploy:smart-wallet:sepolia": "mise exec -- hardhat run scripts/deploy-smart-wallet.js --network sepolia"
+    "deploy:smart-wallet": "mise exec -- hardhat run scripts/deploy-smart-wallet.js --network custom",
+    "swap": "node scripts/swap-via-okx.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "6.1.2",
     "@openzeppelin/contracts": "5.4.0",
     "dotenv": "17.3.1",
-    "hardhat": "2.28.6"
+    "hardhat": "2.28.6",
+    "viem": "^2.21.0"
   }
 }

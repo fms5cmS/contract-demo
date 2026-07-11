@@ -1,6 +1,8 @@
 # contract-self
 
-这是一个基于 Hardhat 的 Solidity 项目，当前主要围绕 `SmartWallet` 合约及其在 Sepolia 上的真实链测试流程展开。
+这是一个基于 Hardhat 的 Solidity 项目，当前围绕 `SmartWallet`（EIP-7702 智能账户实现）及其 `WalletRegistry` 治理合约展开。
+
+> **来源说明（仅文档记录，合约代码中不出现）**：`contracts/smartWallet/SmartWallet.sol`、`WalletRegistry.sol`、`interfaces/ISmartWallet.sol` 迁移自 `uxuy-smart-wallet/ethereum/contracts/UxuySmartProxyV3.sol`（原名 `UxuySmartWalletV3` / `UxuySmartProxyV3` 及配套的 `UxuyRegistry.sol`）。迁移时移除了所有 "uxuy" 品牌字样、合约名与接口名去 uxuy 化、EIP-712 domain name 改名、ERC-7201 storage slot 按新命名空间重新计算，因为这份合约会被部署上链，不应带有原品牌标识。
 
 ## 环境要求
 
@@ -17,26 +19,64 @@ npm install
 
 ## 环境变量配置
 
-先复制示例文件：
+按模块拆成了三个文件，各自复制对应的 `.example` 模板：
 
 ```bash
-cp .env.example .env
+cp .env.common.example .env.common
+cp .env.deploy.example .env.deploy
+cp .env.tx.example .env.tx
 ```
 
-然后填写下面这些字段：
+### `.env.common`（通用，部署和交易脚本共用）
 
-- `RPC_URL`
-  Sepolia RPC 地址。
-- `EOA_PRIVATE_KEY`
-  用于 EIP-7702 委托和钱包直连测试的 EOA 私钥。
-- `SPONSOR_PRIVATE_KEY`
-  用于代付 gas 的 sponsor 私钥。
-- `CHAIN_ID`
-  当前项目默认使用 `11155111`。
-- `ETHERSCAN_API_KEY`
-  Etherscan 开源验证所需的 API key。
+同一时间只对接一条链（不做跨链），网络配置是单个 `custom` network slot，切链只需要改这里的 `RPC_URL`/`CHAIN_ID`，不需要新增 network 配置块。
+
+- `PRIVATE_KEY`
+  签名账号私钥，部署时是部署者；`swap-via-okx.js` 里如果没填 `SPONSOR_PRIVATE_KEY` 就 fallback 用这个当代付账号。
+- `SPONSOR_PRIVATE_KEY`（可选）
+  `swap-via-okx.js` 专用的代付账号私钥，独立于部署账号。是广播交易、垫付 gas 的 admin/relayer（`SmartWallet.executeBatchByAdmin` 的 `msg.sender`）——**必须先用 owner 账号调用 `WalletRegistry.addAdmins()` 把这个地址加进白名单，否则会 revert "Not an authorized admin"**。留空则用 `PRIVATE_KEY`。
+- `RPC_URL` / `CHAIN_ID`
+  目标链的 RPC 地址和 chainId。默认 `CHAIN_ID` 是 `11155111`（Sepolia）；部署到 Robinhood Chain 主网时改成 `https://rpc.mainnet.chain.robinhood.com` / `4663`。
 - `SMART_WALLET_ADDRESS`
-  已部署的 SmartWallet 实现合约地址。
+  当前目标链上已部署的 `SmartWallet` 实现合约地址，`swap-via-okx.js` 用它作为 EIP-7702 委托目标。部署后手动填，不是自动读取的。
+
+### `.env.deploy`（只在部署 `WalletRegistry` / `SmartWallet` 时用到）
+
+- `REGISTRY_OWNER`
+  部署 `WalletRegistry` 时传入的 owner 地址（拥有 pause / admin 白名单 / gasReceive 白名单的完全控制权，且不可 renounce）。
+- `ADMIN_ADDRESSES`（可选，逗号分隔）
+  部署后立即写入 `WalletRegistry.addAdmins()` 的 relayer 地址；不设置的话 `executeBatchByAdmin` 会全部 revert，需要 owner 之后单独调用。
+- `GAS_RECEIVE_ADDRESSES`（可选，逗号分隔）
+  部署后立即写入 `WalletRegistry.addGasReceives()` 的收款地址；不设置的话任何 `gasFee > 0` 的 `executeBatchByAdmin` 都会 revert。
+- `DEPLOY_GAS_LIMIT`（可选）
+  覆盖默认 `3000000` 的部署 gas limit。
+- `ETHERSCAN_API_KEY`
+  合约开源验证用的 Etherscan V2 API key。
+
+### `.env.tx`（`scripts/swap-via-okx.js` 用）
+
+通过 OKX DEX Aggregator 完成一笔 swap，用 EIP-7702 在一笔交易里完成「委托 + swap + 收手续费」，admin（`.env.common` 的 `PRIVATE_KEY`）代付 gas，走 `SmartWallet.executeBatchByAdmin`。全部参数走配置文件，没有 CLI 参数。
+
+- `OKX_API_KEY` / `OKX_API_SECRET` / `OKX_API_PASSPHRASE` / `OKX_API_PROJECT`
+  OKX Onchain OS API 凭证（[Developer Portal](https://web3.okx.com/onchainos/dev-portal/project) 申请）。
+- `EOA_PRIVATE_KEY`
+  委托方（付款方）EOA 私钥，会被 EIP-7702 委托到 `SMART_WALLET_ADDRESS`。和 admin 广播账号是两个不同账号。
+- `SWAP_SIDE`
+  `buy`（花 `FROM_TOKEN_ADDRESS` 买 `TO_TOKEN_ADDRESS`）或 `sell`（反过来）。决定手续费扣哪个代币：buy 扣 `FROM_TOKEN_ADDRESS`，sell 扣 `TO_TOKEN_ADDRESS`。
+- `FROM_TOKEN_ADDRESS` / `TO_TOKEN_ADDRESS`
+  代币合约地址。原生代币（ETH）用 OKX 约定的占位地址 `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`（不是 `address(0)`，脚本内部会转换成合约需要的 `address(0)`）。
+- `AMOUNT`
+  卖出数量，带精度的最小单位。
+- `SLIPPAGE_PERCENT`
+  滑点百分比，0-100。
+- `SWAP_RECEIVER_ADDRESS`（可选）
+  买入资产的收款地址，留空默认等于 `EOA_PRIVATE_KEY` 对应地址。
+- `FEE_PERCENT`
+  手续费百分比：buy 按 `AMOUNT` 算，sell 按 OKX 返回的 `minReceiveAmount` 算（不用预估到手量，防止滑点导致手续费比实际到账还多）。
+- `GAS_RECEIVE_ADDRESS`
+  手续费收款地址，必须已经在 `WalletRegistry.addGasReceives()` 白名单里，否则链上会 revert。
+- `BROADCAST`
+  `true` 才真实广播交易；默认（留空/其他值）是 dry-run，只构造交易 + `eth_call` 模拟，不上链。
 
 ## 常用命令
 
@@ -52,11 +92,6 @@ npm run compile
 npm test
 ```
 
-说明：
-
-- 默认测试不会主动发送真实 Sepolia 交易。
-- 真实链测试默认都是 `skip`，避免日常执行时误消耗 gas。
-
 ### 本地节点
 
 ```bash
@@ -65,128 +100,36 @@ npm run node
 
 ## 部署
 
-### 默认网络部署 SmartWallet
+`WalletRegistry` 和 `SmartWallet` 由同一个脚本 `scripts/deploy-smart-wallet.js` 依次部署（先 Registry，后传入 Registry 地址部署 SmartWallet），跑在 `.env.common` 里配置的目标链上：
 
 ```bash
 npm run deploy:smart-wallet
 ```
 
-### 部署到 Sepolia
+部署脚本成功后会输出 `WalletRegistry` 和 `SmartWallet` 的合约地址。
+
+## 通过 OKX 完成一笔 swap（EIP-7702 委托 + swap + 收手续费一笔交易完成）
 
 ```bash
-npm run deploy:smart-wallet:sepolia
+npm run swap
 ```
 
-部署脚本在成功后会输出合约地址。
-
-## Sepolia 真实链测试
-
-### 1. type-4 委托 + 初始化 + 批量授权
-
-执行命令：
-
-```bash
-npm run test:sepolia:type4
-```
-
-作用：
-
-- 使用配置文件中的 `EOA_PRIVATE_KEY` 对应 EOA。
-- 通过 type-4 交易把该 EOA 委托到 `SMART_WALLET_ADDRESS` 指向的 SmartWallet 实现合约。
-- 在同一笔交易里完成初始化。
-- 在同一笔交易里完成批量授权执行。
-
-当前测试目标：
-
-- token `0x0B6a0A69B7040b2281730cBaE6060b3b1b2ed3A9` 授权额度 `1`
-- token `0xd67215fD6c0890493F34aF3C5E4231cE98871fCb` 授权额度 `2`
-- token `0x10279e6333f9d0EE103F4715b8aaEA75BE61464C` 授权额度 `3`
-- spender `0xDB115FB6b4a3b74346eaA747a9d45DfBBB8e2B4C`
-
-对应测试文件：
-
-- `test/smartWallet/type4-delegate-init-execute.test.js`
-
-### 2. 普通交易批量取消授权
-
-执行命令：
-
-```bash
-npm run test:sepolia:revoke
-```
-
-作用：
-
-- 依然使用配置文件中的 `EOA_PRIVATE_KEY` 对应 EOA。
-- 不再走 type-4。
-- 直接由该 EOA 发起普通交易，调用已经完成委托和初始化的 SmartWallet。
-- 批量将上述 3 个 token 对同一个 spender 的授权额度撤销为 `0`。
-
-说明：
-
-- 这条测试要求配置中的 EOA 已经完成过 SmartWallet 的委托和初始化。
-- 如果 EOA 主链币余额不足，测试内部会先通过 sponsor 强制补充一小笔 ETH，用于支付普通交易 gas。
-
-对应测试文件：
-
-- `test/smartWallet/direct-execute-batch-revoke.test.js`
-
-### 3. sponsor 代付 gas 的普通交易授权
-
-执行命令：
-
-```bash
-npm run test:sepolia:relay-approve
-```
-
-作用：
-
-- 使用配置文件中的 `EOA_PRIVATE_KEY` 生成签名授权。
-- 由 sponsor 发起一笔普通交易，直接调用已经完成委托和初始化的 SmartWallet。
-- 对 token `0x10279e6333f9d0EE103F4715b8aaEA75BE61464C` 向 spender `0xFdE37Fc2DFb18D5d901768A47c222feF30C7EFc5` 授权 `10`。
-- `gasToken` 使用主链币，也就是 `address(0)`。
-- `gasFee` 固定为 `1 Gwei`。
-- `gasReceive` 固定为 sponsor 地址 `0x9B3390F251A28f3b9EF82621270B4b7c0dE6cC4a`。
-
-说明：
-
-- 这条测试不是 type-4。
-- 它走的是 SmartWallet 的 relayer 普通交易路径：EOA 只负责签名，sponsor 负责真正发链上交易。
-
-对应测试文件：
-
-- `test/smartWallet/relayed-approve-native-gas-fee.test.js`
-
-## 链上日志记录
-
-`test/smartWallet` 目录下的真实链测试会把 `smartWallet` 相关交易记录到按链名命名的日志文件中。
-
-当前日志文件：
-
-- `test/smartWallet/sepolia.md`
-
-日志内容包括：
-
-- 测试文件名
-- 交易哈希
-- 区块号
-- 钱包 EOA
-- 本次链上操作的中文说明
+默认 dry-run（只打印构造出的交易和模拟结果，不广播），`.env.tx` 里 `BROADCAST=true` 才会真实上链。
 
 ## 目录说明
 
 - `contracts/smartWallet/`
-  SmartWallet 合约与接口。
+  `SmartWallet.sol`（EIP-7702 委托实现）、`WalletRegistry.sol`（全局 pause / admin 白名单 / gasReceive 白名单治理合约）与 `interfaces/ISmartWallet.sol`。
 - `scripts/`
-  部署脚本。
-- `test/smartWallet/`
-  SmartWallet 相关测试和对应链上日志。
+  部署脚本、`swap-via-okx.js`（OKX swap 交易脚本）、`scripts/lib/okx-client.js`（OKX API 签名 + 请求封装）。
+- `deployments/`
+  按链名命名的真实链上部署日志（合约地址、交易哈希、区块号、白名单配置），部署到新链后手动补一份。
+- `transactions/`
+  按链名命名的真实链上交易日志（`swap-via-okx.js` 在 `BROADCAST=true` 下的执行记录），dry-run 不记录。
 - `docs/superpowers/`
   设计文档和实现计划。
 
 ## 补充说明
 
 - 本地编译和默认测试不依赖外部 RPC。
-- `test:sepolia:type4` 需要 `EOA_PRIVATE_KEY` 和 `SPONSOR_PRIVATE_KEY` 都有效。
-- `test:sepolia:revoke` 同样依赖这两个私钥，其中 sponsor 主要用于必要时补 gas。
 - Etherscan 验证能力已经接入 `ETHERSCAN_API_KEY`。
